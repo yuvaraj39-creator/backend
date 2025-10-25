@@ -30,8 +30,10 @@ const corsOptions = {
             'http://127.0.0.1:3000',
             'http://localhost:8080',
             'http://127.0.0.1:8080',
-            'http://localhost:5501',
-            'http://127.0.0.1:5501'
+            'http://localhost:5500',
+            'http://127.0.0.1:5500',
+            "https://u1technology.netlify.app",
+            "https://www.u1technology.co.in"
         ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -648,11 +650,11 @@ app.post('/api/auth/register', async (req, res) => {
             additionalInfo
         } = req.body;
 
-        console.log('Registration attempt:', { 
-            name: name?.substring(0, 20) + '...', 
-            email, 
-            phone, 
-            experience 
+        console.log('Registration attempt:', {
+            name: name?.substring(0, 20) + '...',
+            email,
+            phone,
+            experience
         });
 
         // Basic validation
@@ -666,7 +668,7 @@ app.post('/api/auth/register', async (req, res) => {
         // Check if user already exists
         const existingUser = await User.findOne({
             $or: [
-                { email: email.toLowerCase().trim() }, 
+                { email: email.toLowerCase().trim() },
                 { phone: phone.trim() }
             ]
         });
@@ -725,9 +727,9 @@ app.post('/api/auth/register', async (req, res) => {
                 field: err.path,
                 message: err.message
             }));
-            
+
             console.log('Validation errors:', errors);
-            
+
             return res.status(400).json({
                 success: false,
                 message: 'Registration validation failed',
@@ -1341,7 +1343,7 @@ app.put('/api/courses/:id', authenticateAdmin, async (req, res) => {
 app.get('/api/courses/categories', async (req, res) => {
     try {
         const categories = await Course.distinct('category', { isDeleted: false });
-        
+
         res.json({
             success: true,
             data: {
@@ -1360,11 +1362,11 @@ app.get('/api/courses/categories', async (req, res) => {
 // Get all course sellers
 app.get('/api/courses/sellers', async (req, res) => {
     try {
-        const sellers = await Course.distinct('seller', { 
+        const sellers = await Course.distinct('seller', {
             isDeleted: false,
             seller: { $ne: null, $ne: '' }
         });
-        
+
         res.json({
             success: true,
             data: {
@@ -1729,7 +1731,7 @@ app.use((req, res) => {
             message: 'API route not found'
         });
     }
-    
+
     // For non-API routes, you might want to serve your frontend
     res.status(404).json({
         success: false,
