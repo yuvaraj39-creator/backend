@@ -182,6 +182,12 @@ const authenticateAdmin = async (req, res, next) => {
 };
 
 // Routes
+app.get("/", (req, res) => {
+    res.json({
+        success: true,
+        message: "Backend is running successfully!"
+    });
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
