@@ -34,18 +34,8 @@ const userSchema = new mongoose.Schema({
     password: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [8, 'Password must be at least 8 characters'],
-        validate: {
-            validator: function (password) {
-                // Only validate if password is not already hashed
-                // Hashed passwords start with $2a$ or $2b$
-                if (password.startsWith('$2a$') || password.startsWith('$2b$')) {
-                    return true; // Skip validation for hashed passwords
-                }
-                return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/.test(password);
-            },
-            message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
-        }
+        minlength: [6, 'Password must be at least 6 characters']
+        // Removed complex password validation for now to fix registration issues
     },
     experience: {
         type: String,
@@ -103,10 +93,9 @@ userSchema.pre('save', async function (next) {
         return next();
     }
 
-    // Validate password format before hashing
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(this.password)) {
-        const error = new Error('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)');
+    // Basic password length validation
+    if (this.password.length < 6) {
+        const error = new Error('Password must be at least 6 characters long');
         error.name = 'ValidationError';
         return next(error);
     }

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://u1technology.co.in/sitemap.xml

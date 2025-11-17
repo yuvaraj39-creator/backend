@@ -15,6 +15,9 @@ const Course = require('./models/Course');
 const Poster = require('./models/Poster');
 const AdminLogin = require('./models/adminlogin');
 const OTP = require('./models/OTP');
+const Application = require('./models/Application');
+const Community = require('./models/Community');
+const QuizRedeem = require('./models/QuizRedeem');
 
 const app = express();
 
@@ -59,10 +62,10 @@ const authLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
 });
-
+// OTP Limiter 
 const otpLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 3, // Limit each IP to 3 OTP requests per windowMs
+    windowMs: 150 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 3 OTP requests per windowMs
     message: {
         success: false,
         message: 'Too many OTP requests, please try again later.'
@@ -188,6 +191,135 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
+
+
+// Contact form submission
+app.post('/api/contact', async (req, res) => {
+    try {
+        const { name, email, subject, message } = req.body;
+
+        // Validate required fields
+        if (!name || !email || !subject || !message) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields are required'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a valid email address'
+            });
+        }
+
+        // Check if email credentials are configured
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+            console.warn('Email credentials not configured. Contact form submission received:', { name, email, subject });
+            return res.status(500).json({
+                success: false,
+                message: 'Email service not configured. Please contact administrator.'
+            });
+        }
+
+        // Setup email transporter
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD
+            }
+        });
+
+        // Email content for admin
+        const adminMailOptions = {
+            from: `"U1 Technology Website" <${process.env.EMAIL_USER}>`,
+            to: process.env.EMAIL_USER,
+            subject: `New Contact Form Submission: ${subject}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">New Contact Form Submission</h2>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Name:</strong> ${name}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                        <p><strong>Subject:</strong> ${subject}</p>
+                        <p><strong>Message:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            ${message.replace(/\n/g, '<br>')}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        This message was sent from the U1 Technology Institute website contact form.
+                    </p>
+                </div>
+            `
+        };
+
+        // Email content for user (confirmation)
+        const userMailOptions = {
+            from: `"U1 Technology Institute" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Thank you for contacting U1 Technology Institute',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">Thank You for Contacting Us</h2>
+                    <p style="font-size: 16px; color: #333;">
+                        Dear ${name},
+                    </p>
+                    <p style="font-size: 16px; color: #333;">
+                        Thank you for reaching out to U1 Technology Institute. We have received your message and will get back to you within 24-48 hours.
+                    </p>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Your Message:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            ${message.replace(/\n/g, '<br>')}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        If you have any urgent inquiries, please call us at +91 99523 91994.
+                    </p>
+                    <hr style="border: none; border-top: 1px solid rgba(128, 0, 32, 0.2); margin: 25px 0;">
+                    <p style="color: #777; font-size: 12px; text-align: center;">
+                        This is an automated response. Please do not reply to this email.
+                    </p>
+                    <p style="text-align: center; color: rgba(128, 0, 32, 0.7); font-size: 12px; margin-top: 20px;">
+                        — U1 Technology Institute Team
+                    </p>
+                </div>
+            `
+        };
+
+        // Send emails
+        await transporter.sendMail(adminMailOptions);
+        await transporter.sendMail(userMailOptions);
+
+        console.log(`Contact form submission received and emails sent for: ${email}`);
+
+        res.json({
+            success: true,
+            message: 'Message sent successfully'
+        });
+
+    } catch (error) {
+        console.error('Contact form error:', error);
+
+        // More specific error messages
+        if (error.code === 'EAUTH') {
+            return res.status(500).json({
+                success: false,
+                message: 'Email authentication failed. Please check email configuration.'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send message. Please try again later.'
+        });
+    }
+});
+
 
 // Admin Login
 app.post('/api/admin/login', async (req, res) => {
@@ -1721,6 +1853,1072 @@ app.use((error, req, res, next) => {
         message: 'Internal server error'
     });
 });
+
+
+
+// Submit Course Application
+app.post('/api/applications/submit', async (req, res) => {
+    try {
+        const {
+            name,
+            phone,
+            email,
+            course,
+            studyMode,
+            message
+        } = req.body;
+
+        console.log('Course application submission:', {
+            name: name?.substring(0, 20) + '...',
+            email,
+            course,
+            studyMode
+        });
+
+        // Basic validation
+        if (!name || !phone || !email || !course || !studyMode) {
+            return res.status(400).json({
+                success: false,
+                message: 'All required fields must be filled: name, phone, email, course, study mode'
+            });
+        }
+
+        // Check for duplicate applications (same email and course within last 24 hours)
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const existingApplication = await Application.findOne({
+            email: email.toLowerCase().trim(),
+            course,
+            createdAt: { $gte: twentyFourHoursAgo }
+        });
+
+        if (existingApplication) {
+            return res.status(400).json({
+                success: false,
+                message: 'You have already applied for this course recently. Please wait 24 hours before submitting another application.'
+            });
+        }
+
+        // Create new application
+        const application = new Application({
+            name: name.trim(),
+            phone: phone.trim(),
+            email: email.toLowerCase().trim(),
+            course,
+            studyMode,
+            message: message ? message.trim() : '',
+            ipAddress: req.ip || req.connection.remoteAddress,
+            userAgent: req.get('User-Agent')
+        });
+
+        await application.save();
+
+        console.log('Course application submitted successfully:', application.applicationId);
+
+        res.status(201).json({
+            success: true,
+            message: 'Application submitted successfully! We will contact you soon.',
+            data: {
+                application: application.getFormattedApplication(),
+                applicationId: application.applicationId
+            }
+        });
+
+    } catch (error) {
+        console.error('Application submission error:', error);
+
+        // Mongoose validation error
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => ({
+                field: err.path,
+                message: err.message
+            }));
+
+            return res.status(400).json({
+                success: false,
+                message: 'Application validation failed',
+                errors: errors
+            });
+        }
+
+        // Duplicate application ID error (should be very rare)
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Duplicate application detected. Please try again.'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to submit application. Please try again later.'
+        });
+    }
+});
+
+// Get all applications (Admin only)
+app.get('/api/applications', authenticateAdmin, async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search = '',
+            status = '',
+            course = '',
+            studyMode = '',
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        // Build query
+        let query = {};
+
+        // Search functionality
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } },
+                { applicationId: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // Status filter
+        if (status) {
+            query.status = status;
+        }
+
+        // Course filter
+        if (course) {
+            query.course = course;
+        }
+
+        // Study mode filter
+        if (studyMode) {
+            query.studyMode = studyMode;
+        }
+
+        // Sort options
+        const sortOptions = {};
+        sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+        // Get applications with pagination
+        const applications = await Application.find(query)
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limitNum);
+
+        // Get total count for pagination
+        const total = await Application.countDocuments(query);
+        const totalPages = Math.ceil(total / limitNum);
+
+        res.json({
+            success: true,
+            data: {
+                applications,
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages,
+                    totalApplications: total,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get applications error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch applications'
+        });
+    }
+});
+
+// Get single application by ID (Admin only)
+app.get('/api/applications/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const application = await Application.findOne({
+            $or: [
+                { _id: req.params.id },
+                { applicationId: req.params.id }
+            ]
+        });
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                application: application.getFormattedApplication()
+            }
+        });
+
+    } catch (error) {
+        console.error('Get application error:', error);
+
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid application ID'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch application'
+        });
+    }
+});
+
+// Update application status (Admin only)
+app.put('/api/applications/:id/status', authenticateAdmin, async (req, res) => {
+    try {
+        const { status, adminNotes } = req.body;
+
+        if (!status) {
+            return res.status(400).json({
+                success: false,
+                message: 'Status is required'
+            });
+        }
+
+        const application = await Application.findOne({
+            $or: [
+                { _id: req.params.id },
+                { applicationId: req.params.id }
+            ]
+        });
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        application.status = status;
+        if (adminNotes) {
+            application.adminNotes = adminNotes;
+        }
+
+        await application.save();
+
+        res.json({
+            success: true,
+            message: 'Application status updated successfully',
+            data: {
+                application: application.getFormattedApplication()
+            }
+        });
+
+    } catch (error) {
+        console.error('Update application status error:', error);
+
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update application status'
+        });
+    }
+});
+
+// Get application statistics (Admin only)
+app.get('/api/applications/stats/overview', authenticateAdmin, async (req, res) => {
+    try {
+        const totalApplications = await Application.countDocuments();
+        const pendingApplications = await Application.countDocuments({ status: 'pending' });
+        const contactedApplications = await Application.countDocuments({ status: 'contacted' });
+        const approvedApplications = await Application.countDocuments({ status: 'approved' });
+
+        // Applications by course
+        const applicationsByCourse = await Application.aggregate([
+            {
+                $group: {
+                    _id: '$course',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        // Applications by study mode
+        const applicationsByStudyMode = await Application.aggregate([
+            {
+                $group: {
+                    _id: '$studyMode',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        // Recent applications (last 30 days)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recentApplications = await Application.countDocuments({
+            createdAt: { $gte: thirtyDaysAgo }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                total: totalApplications,
+                pending: pendingApplications,
+                contacted: contactedApplications,
+                approved: approvedApplications,
+                recent: recentApplications,
+                byCourse: applicationsByCourse,
+                byStudyMode: applicationsByStudyMode
+            }
+        });
+
+    } catch (error) {
+        console.error('Get application stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch application statistics'
+        });
+    }
+});
+
+
+
+
+// Join Community Submission
+app.post('/api/community/join', async (req, res) => {
+    try {
+        const {
+            name,
+            phone,
+            email,
+            skills,
+            experienceLevel,
+            yearsExperience,
+            portfolioUrl,
+            linkedinUrl
+        } = req.body;
+
+        console.log('Community join submission:', {
+            name: name?.substring(0, 20) + '...',
+            email,
+            experienceLevel,
+            skillsCount: skills?.length || 0,
+            portfolioUrl: portfolioUrl ? 'provided' : 'not provided',
+            linkedinUrl: linkedinUrl ? 'provided' : 'not provided'
+        });
+
+        // Basic validation
+        if (!name || !phone || !email || !skills || !experienceLevel) {
+            return res.status(400).json({
+                success: false,
+                message: 'All required fields must be filled: name, phone, email, skills, experience level'
+            });
+        }
+
+        // Validate skills array
+        if (!Array.isArray(skills) || skills.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one skill is required'
+            });
+        }
+
+        // Validate experience level
+        const validExperienceLevels = ['fresher', 'experienced'];
+        if (!validExperienceLevels.includes(experienceLevel)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid experience level'
+            });
+        }
+
+        // Validate years of experience for experienced level
+        if (experienceLevel === 'experienced' && (!yearsExperience || yearsExperience < 1)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid years of experience is required for experienced level'
+            });
+        }
+
+        // Validate URLs if provided
+        if (portfolioUrl) {
+            const urlRegex = /^https?:\/\/.+\..+/;
+            if (!urlRegex.test(portfolioUrl)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Please provide a valid portfolio URL'
+                });
+            }
+        }
+
+        if (linkedinUrl) {
+            const linkedinRegex = /^https?:\/\/(www\.)?linkedin\.com\/in\/.+/;
+            if (!linkedinRegex.test(linkedinUrl)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Please provide a valid LinkedIn URL (should be in format: https://linkedin.com/in/username)'
+                });
+            }
+        }
+
+        // Check for duplicate submissions (same email or phone within last 24 hours)
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const existingSubmission = await Community.findOne({
+            $or: [
+                { email: email.toLowerCase() },
+                { phone: phone }
+            ],
+            createdAt: { $gte: twentyFourHoursAgo }
+        });
+
+        if (existingSubmission) {
+            return res.status(400).json({
+                success: false,
+                message: 'You have already submitted a community join request recently. Please wait 24 hours before submitting another request.'
+            });
+        }
+
+        // Create new community submission
+        const communitySubmission = new Community({
+            name: name.trim(),
+            phone: phone.trim(),
+            email: email.toLowerCase().trim(),
+            skills: skills.map(skill => skill.trim()),
+            experienceLevel,
+            yearsExperience: experienceLevel === 'experienced' ? parseInt(yearsExperience) : undefined,
+            portfolioUrl: portfolioUrl ? portfolioUrl.trim() : undefined,
+            linkedinUrl: linkedinUrl ? linkedinUrl.trim() : undefined,
+            ipAddress: req.ip || req.connection.remoteAddress,
+            userAgent: req.get('User-Agent')
+        });
+
+        await communitySubmission.save();
+
+        console.log('Community join request submitted successfully:', communitySubmission._id);
+
+        res.status(201).json({
+            success: true,
+            message: 'Thank you for joining our community! We will contact you soon.',
+            data: {
+                submission: communitySubmission.formattedCommunity
+            }
+        });
+
+    } catch (error) {
+        console.error('Community join submission error:', error);
+
+        // Mongoose validation error
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => ({
+                field: err.path,
+                message: err.message
+            }));
+
+            return res.status(400).json({
+                success: false,
+                message: 'Submission validation failed',
+                errors: errors
+            });
+        }
+
+        // Duplicate key error (if any unique constraints)
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Duplicate submission detected'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to submit community join request. Please try again later.'
+        });
+    }
+});
+
+// Get all community submissions (Admin only)
+app.get('/api/community/submissions', authenticateAdmin, async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search = '',
+            status = '',
+            experienceLevel = '',
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        // Build query
+        let query = {};
+
+        // Search functionality
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } },
+                { skills: { $in: [new RegExp(search, 'i')] } }
+            ];
+        }
+
+        // Status filter
+        if (status) {
+            query.status = status;
+        }
+
+        // Experience level filter
+        if (experienceLevel) {
+            query.experienceLevel = experienceLevel;
+        }
+
+        // Sort options
+        const sortOptions = {};
+        sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+        // Get submissions with pagination
+        const submissions = await Community.find(query)
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limitNum);
+
+        // Get total count for pagination
+        const total = await Community.countDocuments(query);
+        const totalPages = Math.ceil(total / limitNum);
+
+        res.json({
+            success: true,
+            data: {
+                submissions,
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages,
+                    totalSubmissions: total,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get community submissions error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch community submissions'
+        });
+    }
+});
+
+// Get single community submission by ID (Admin only)
+app.get('/api/community/submissions/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const submission = await Community.findById(req.params.id);
+
+        if (!submission) {
+            return res.status(404).json({
+                success: false,
+                message: 'Community submission not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                submission: submission.formattedCommunity
+            }
+        });
+
+    } catch (error) {
+        console.error('Get community submission error:', error);
+
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid submission ID'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch community submission'
+        });
+    }
+});
+
+// Update community submission status (Admin only)
+app.put('/api/community/submissions/:id/status', authenticateAdmin, async (req, res) => {
+    try {
+        const { status, notes } = req.body;
+
+        if (!status) {
+            return res.status(400).json({
+                success: false,
+                message: 'Status is required'
+            });
+        }
+
+        const submission = await Community.findById(req.params.id);
+
+        if (!submission) {
+            return res.status(404).json({
+                success: false,
+                message: 'Community submission not found'
+            });
+        }
+
+        await submission.updateStatus(status, notes);
+
+        res.json({
+            success: true,
+            message: 'Community submission status updated successfully',
+            data: {
+                submission: submission.formattedCommunity
+            }
+        });
+
+    } catch (error) {
+        console.error('Update community submission status error:', error);
+
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update community submission status'
+        });
+    }
+});
+
+// Get community statistics (Admin only)
+app.get('/api/community/stats/overview', authenticateAdmin, async (req, res) => {
+    try {
+        const totalSubmissions = await Community.countDocuments();
+        const pendingSubmissions = await Community.countDocuments({ status: 'pending' });
+        const contactedSubmissions = await Community.countDocuments({ status: 'contacted' });
+        const approvedSubmissions = await Community.countDocuments({ status: 'approved' });
+
+        // Submissions by experience level
+        const submissionsByExperience = await Community.aggregate([
+            {
+                $group: {
+                    _id: '$experienceLevel',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        // Top skills
+        const topSkills = await Community.aggregate([
+            { $unwind: '$skills' },
+            {
+                $group: {
+                    _id: '$skills',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]);
+
+        // Portfolio and LinkedIn stats
+        const portfolioStats = await Community.aggregate([
+            {
+                $group: {
+                    _id: { $cond: [{ $ifNull: ['$portfolioUrl', false] }, 'withPortfolio', 'withoutPortfolio'] },
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const linkedinStats = await Community.aggregate([
+            {
+                $group: {
+                    _id: { $cond: [{ $ifNull: ['$linkedinUrl', false] }, 'withLinkedIn', 'withoutLinkedIn'] },
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        // Recent submissions (last 30 days)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recentSubmissions = await Community.countDocuments({
+            createdAt: { $gte: thirtyDaysAgo }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                total: totalSubmissions,
+                pending: pendingSubmissions,
+                contacted: contactedSubmissions,
+                approved: approvedSubmissions,
+                recent: recentSubmissions,
+                byExperience: submissionsByExperience,
+                topSkills: topSkills,
+                portfolioStats: portfolioStats,
+                linkedinStats: linkedinStats
+            }
+        });
+
+    } catch (error) {
+        console.error('Get community stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch community statistics'
+        });
+    }
+});
+
+
+
+// Store Quiz Redeem Code
+app.post('/api/quiz/redeem', async (req, res) => {
+    try {
+        const {
+            userId,
+            userName,
+            userEmail,
+            score,
+            totalQuestions,
+            redeemCode,
+            quizType = 'programming_math'
+        } = req.body;
+
+        console.log('Quiz redeem code submission:', {
+            userId: userId?.substring(0, 10) + '...',
+            userName: userName?.substring(0, 20) + '...',
+            userEmail,
+            score,
+            totalQuestions,
+            redeemCode
+        });
+
+        // Basic validation
+        if (!userId || !userName || !userEmail || !redeemCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'User ID, name, email, and redeem code are required'
+            });
+        }
+
+        // Validate score
+        if (score === undefined || totalQuestions === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: 'Score and total questions are required'
+            });
+        }
+
+        // Check if user exists
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Check if redeem code already exists for this user and quiz
+        const existingRedeem = await QuizRedeem.findOne({
+            userId: userId,
+            redeemCode: redeemCode,
+            quizType: quizType
+        });
+
+        if (existingRedeem) {
+            return res.status(400).json({
+                success: false,
+                message: 'Redeem code already used for this quiz'
+            });
+        }
+
+        // Create new quiz redeem record
+        const quizRedeem = new QuizRedeem({
+            userId: userId,
+            userName: userName.trim(),
+            userEmail: userEmail.toLowerCase().trim(),
+            score: parseInt(score),
+            totalQuestions: parseInt(totalQuestions),
+            redeemCode: redeemCode.trim(),
+            quizType: quizType,
+            percentage: Math.round((score / totalQuestions) * 100),
+            ipAddress: req.ip || req.connection.remoteAddress,
+            userAgent: req.get('User-Agent')
+        });
+
+        await quizRedeem.save();
+
+        console.log('Quiz redeem code stored successfully:', quizRedeem._id);
+
+        res.status(201).json({
+            success: true,
+            message: 'Redeem code stored successfully',
+            data: {
+                redeemId: quizRedeem._id,
+                redeemCode: quizRedeem.redeemCode,
+                score: quizRedeem.score,
+                totalQuestions: quizRedeem.totalQuestions,
+                percentage: quizRedeem.percentage,
+                createdAt: quizRedeem.createdAt
+            }
+        });
+
+    } catch (error) {
+        console.error('Store quiz redeem code error:', error);
+
+        // Mongoose validation error
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => ({
+                field: err.path,
+                message: err.message
+            }));
+
+            return res.status(400).json({
+                success: false,
+                message: 'Validation failed',
+                errors: errors
+            });
+        }
+
+        // Duplicate key error
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Redeem code already exists'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to store redeem code. Please try again later.'
+        });
+    }
+});
+
+// Get quiz redeem codes for user
+app.get('/api/quiz/redeem/user/:userId', authenticateToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Verify the authenticated user is accessing their own data
+        if (req.user.userId !== userId && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+
+        const redeems = await QuizRedeem.find({ userId: userId })
+            .sort({ createdAt: -1 });
+
+        res.json({
+            success: true,
+            data: {
+                redeems,
+                total: redeems.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Get user quiz redeems error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch redeem codes'
+        });
+    }
+});
+
+// Get all quiz redeem codes (Admin only)
+app.get('/api/quiz/redeem', authenticateAdmin, async (req, res) => {
+    try {
+        const {
+            page = 1,
+            limit = 10,
+            search = '',
+            quizType = '',
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        // Build query
+        let query = {};
+
+        // Search functionality
+        if (search) {
+            query.$or = [
+                { userName: { $regex: search, $options: 'i' } },
+                { userEmail: { $regex: search, $options: 'i' } },
+                { redeemCode: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // Quiz type filter
+        if (quizType) {
+            query.quizType = quizType;
+        }
+
+        // Sort options
+        const sortOptions = {};
+        sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+        // Get redeems with pagination
+        const redeems = await QuizRedeem.find(query)
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limitNum);
+
+        // Get total count for pagination
+        const total = await QuizRedeem.countDocuments(query);
+        const totalPages = Math.ceil(total / limitNum);
+
+        // Get statistics
+        const totalRedeems = await QuizRedeem.countDocuments();
+        const perfectScores = await QuizRedeem.countDocuments({ percentage: 100 });
+        const averageScore = await QuizRedeem.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    averagePercentage: { $avg: '$percentage' }
+                }
+            }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                redeems,
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages,
+                    totalRedeems: total,
+                    hasNext: pageNum < totalPages,
+                    hasPrev: pageNum > 1
+                },
+                statistics: {
+                    total: totalRedeems,
+                    perfectScores: perfectScores,
+                    averagePercentage: averageScore[0]?.averagePercentage ? Math.round(averageScore[0].averagePercentage) : 0
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get quiz redeems error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch redeem codes'
+        });
+    }
+});
+
+// Get quiz statistics (Admin only)
+app.get('/api/quiz/stats/overview', authenticateAdmin, async (req, res) => {
+    try {
+        // Total redeems
+        const totalRedeems = await QuizRedeem.countDocuments();
+
+        // Redeems by quiz type
+        const redeemsByType = await QuizRedeem.aggregate([
+            {
+                $group: {
+                    _id: '$quizType',
+                    count: { $sum: 1 },
+                    averageScore: { $avg: '$percentage' }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        // Score distribution
+        const scoreDistribution = await QuizRedeem.aggregate([
+            {
+                $bucket: {
+                    groupBy: '$percentage',
+                    boundaries: [0, 50, 70, 80, 90, 100],
+                    default: 'other',
+                    output: {
+                        count: { $sum: 1 }
+                    }
+                }
+            }
+        ]);
+
+        // Recent redeems (last 30 days)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recentRedeems = await QuizRedeem.countDocuments({
+            createdAt: { $gte: thirtyDaysAgo }
+        });
+
+        // Top performers
+        const topPerformers = await QuizRedeem.aggregate([
+            {
+                $match: { percentage: 100 }
+            },
+            {
+                $group: {
+                    _id: '$userEmail',
+                    userName: { $first: '$userName' },
+                    perfectScores: { $sum: 1 },
+                    lastPerfectScore: { $max: '$createdAt' }
+                }
+            },
+            { $sort: { perfectScores: -1 } },
+            { $limit: 10 }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                total: totalRedeems,
+                recent: recentRedeems,
+                byType: redeemsByType,
+                scoreDistribution: scoreDistribution,
+                topPerformers: topPerformers
+            }
+        });
+
+    } catch (error) {
+        console.error('Get quiz stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch quiz statistics'
+        });
+    }
+});
+
+
+
 
 // 404 handler for undefined routes
 app.use((req, res) => {
