@@ -22,7 +22,11 @@ const QuizRedeem = require('./models/QuizRedeem');
 const app = express();
 
 // Security middleware - Helmet for secure HTTP headers
-app.use(helmet());
+app.use(cors(corsOptions));   // CORS FIRST
+app.use(helmet({
+  crossOriginResourcePolicy: false
+}));                          // Helmet AFTER CORS
+
 
 // CORS configuration
 const corsOptions = {
@@ -43,7 +47,7 @@ const corsOptions = {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
-app.use(cors(corsOptions));
+
 
 // Body parsing middleware with limits
 app.use(express.json({ limit: '10mb' }));
