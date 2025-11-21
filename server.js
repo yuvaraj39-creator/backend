@@ -36,6 +36,7 @@ const corsOptions = {
             'http://localhost:5500',
             'http://127.0.0.1:5500',
             "https://u1technology.netlify.app",
+            "https://u1technology.co.in",
             "https://www.u1technology.co.in"
         ],
     credentials: true,
@@ -2614,7 +2615,7 @@ app.post('/api/quiz/redeem', async (req, res) => {
             score,
             totalQuestions,
             redeemCode,
-            quizType = 'programming_math'
+            quizType = 'general'
         } = req.body;
 
         console.log('Quiz redeem code submission:', {
@@ -2634,7 +2635,7 @@ app.post('/api/quiz/redeem', async (req, res) => {
             });
         }
 
-        // Validate score
+        // Validate score and totalQuestions
         if (score === undefined || totalQuestions === undefined) {
             return res.status(400).json({
                 success: false,
@@ -2642,28 +2643,8 @@ app.post('/api/quiz/redeem', async (req, res) => {
             });
         }
 
-        // Check if user exists
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-
-        // Check if redeem code already exists for this user and quiz
-        const existingRedeem = await QuizRedeem.findOne({
-            userId: userId,
-            redeemCode: redeemCode,
-            quizType: quizType
-        });
-
-        if (existingRedeem) {
-            return res.status(400).json({
-                success: false,
-                message: 'Redeem code already used for this quiz'
-            });
-        }
+        // Calculate percentage
+        const percentage = Math.round((parseInt(score) / parseInt(totalQuestions)) * 100);
 
         // Create new quiz redeem record
         const quizRedeem = new QuizRedeem({
@@ -2674,7 +2655,7 @@ app.post('/api/quiz/redeem', async (req, res) => {
             totalQuestions: parseInt(totalQuestions),
             redeemCode: redeemCode.trim(),
             quizType: quizType,
-            percentage: Math.round((score / totalQuestions) * 100),
+            percentage: percentage,
             ipAddress: req.ip || req.connection.remoteAddress,
             userAgent: req.get('User-Agent')
         });
@@ -2717,46 +2698,13 @@ app.post('/api/quiz/redeem', async (req, res) => {
         if (error.code === 11000) {
             return res.status(400).json({
                 success: false,
-                message: 'Redeem code already exists'
+                message: 'Redeem code already exists for this user'
             });
         }
 
         res.status(500).json({
             success: false,
             message: 'Failed to store redeem code. Please try again later.'
-        });
-    }
-});
-
-// Get quiz redeem codes for user
-app.get('/api/quiz/redeem/user/:userId', authenticateToken, async (req, res) => {
-    try {
-        const { userId } = req.params;
-
-        // Verify the authenticated user is accessing their own data
-        if (req.user.userId !== userId && req.user.role !== 'admin') {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied'
-            });
-        }
-
-        const redeems = await QuizRedeem.find({ userId: userId })
-            .sort({ createdAt: -1 });
-
-        res.json({
-            success: true,
-            data: {
-                redeems,
-                total: redeems.length
-            }
-        });
-
-    } catch (error) {
-        console.error('Get user quiz redeems error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch redeem codes'
         });
     }
 });
@@ -2808,18 +2756,6 @@ app.get('/api/quiz/redeem', authenticateAdmin, async (req, res) => {
         const total = await QuizRedeem.countDocuments(query);
         const totalPages = Math.ceil(total / limitNum);
 
-        // Get statistics
-        const totalRedeems = await QuizRedeem.countDocuments();
-        const perfectScores = await QuizRedeem.countDocuments({ percentage: 100 });
-        const averageScore = await QuizRedeem.aggregate([
-            {
-                $group: {
-                    _id: null,
-                    averagePercentage: { $avg: '$percentage' }
-                }
-            }
-        ]);
-
         res.json({
             success: true,
             data: {
@@ -2830,11 +2766,6 @@ app.get('/api/quiz/redeem', authenticateAdmin, async (req, res) => {
                     totalRedeems: total,
                     hasNext: pageNum < totalPages,
                     hasPrev: pageNum > 1
-                },
-                statistics: {
-                    total: totalRedeems,
-                    perfectScores: perfectScores,
-                    averagePercentage: averageScore[0]?.averagePercentage ? Math.round(averageScore[0].averagePercentage) : 0
                 }
             }
         });
@@ -2848,77 +2779,35 @@ app.get('/api/quiz/redeem', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Get quiz statistics (Admin only)
-app.get('/api/quiz/stats/overview', authenticateAdmin, async (req, res) => {
+// Get quiz redeem codes for specific user
+app.get('/api/quiz/redeem/user/:userId', authenticateToken, async (req, res) => {
     try {
-        // Total redeems
-        const totalRedeems = await QuizRedeem.countDocuments();
+        const { userId } = req.params;
 
-        // Redeems by quiz type
-        const redeemsByType = await QuizRedeem.aggregate([
-            {
-                $group: {
-                    _id: '$quizType',
-                    count: { $sum: 1 },
-                    averageScore: { $avg: '$percentage' }
-                }
-            },
-            { $sort: { count: -1 } }
-        ]);
+        // Verify the authenticated user is accessing their own data
+        if (req.user.userId !== userId && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
 
-        // Score distribution
-        const scoreDistribution = await QuizRedeem.aggregate([
-            {
-                $bucket: {
-                    groupBy: '$percentage',
-                    boundaries: [0, 50, 70, 80, 90, 100],
-                    default: 'other',
-                    output: {
-                        count: { $sum: 1 }
-                    }
-                }
-            }
-        ]);
-
-        // Recent redeems (last 30 days)
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        const recentRedeems = await QuizRedeem.countDocuments({
-            createdAt: { $gte: thirtyDaysAgo }
-        });
-
-        // Top performers
-        const topPerformers = await QuizRedeem.aggregate([
-            {
-                $match: { percentage: 100 }
-            },
-            {
-                $group: {
-                    _id: '$userEmail',
-                    userName: { $first: '$userName' },
-                    perfectScores: { $sum: 1 },
-                    lastPerfectScore: { $max: '$createdAt' }
-                }
-            },
-            { $sort: { perfectScores: -1 } },
-            { $limit: 10 }
-        ]);
+        const redeems = await QuizRedeem.find({ userId: userId })
+            .sort({ createdAt: -1 });
 
         res.json({
             success: true,
             data: {
-                total: totalRedeems,
-                recent: recentRedeems,
-                byType: redeemsByType,
-                scoreDistribution: scoreDistribution,
-                topPerformers: topPerformers
+                redeems,
+                total: redeems.length
             }
         });
 
     } catch (error) {
-        console.error('Get quiz stats error:', error);
+        console.error('Get user quiz redeems error:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to fetch quiz statistics'
+            message: 'Failed to fetch redeem codes'
         });
     }
 });
