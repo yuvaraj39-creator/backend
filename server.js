@@ -21,32 +21,25 @@ const QuizRedeem = require('./models/QuizRedeem');
 
 const app = express();
 
-// Security middleware - Helmet for secure HTTP headers
-app.use(cors(corsOptions));   // CORS FIRST
-app.use(helmet({
-  crossOriginResourcePolicy: false
-}));                          // Helmet AFTER CORS
-
-
 // CORS configuration
 const corsOptions = {
-    origin: process.env.NODE_ENV === 'production'
-        ? process.env.ALLOWED_ORIGINS?.split(',') || []
-        : [
-            'http://localhost:3000',
-            'http://127.0.0.1:3000',
-            'http://localhost:8080',
-            'http://127.0.0.1:8080',
-            'http://localhost:5500',
-            'http://127.0.0.1:5500',
-            "https://u1technology.netlify.app",
-            "https://u1technology.co.in",
-            "https://www.u1technology.co.in"
-        ],
+    origin: [
+        "https://u1technology.netlify.app",
+        "https://u1technology.co.in",
+        "https://www.u1technology.co.in"
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
+
+// Apply CORS BEFORE helmet
+app.use(cors(corsOptions));
+
+app.use(helmet({
+  crossOriginResourcePolicy: false
+}));
+
 
 
 // Body parsing middleware with limits
