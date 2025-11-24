@@ -26,7 +26,9 @@ const corsOptions = {
     origin: [
         "https://u1technology.netlify.app",
         "https://u1technology.co.in",
-        "https://www.u1technology.co.in"
+        "https://www.u1technology.co.in",
+        "http://localhost:3000",
+        "http://127.0.0.1:5500"
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -1344,6 +1346,26 @@ app.get('/api/courses', async (req, res) => {
     }
 });
 
+// Get all course categories
+app.get('/api/courses/categories', async (req, res) => {
+    try {
+        const categories = await Course.distinct('category', { isDeleted: false });
+
+        res.json({
+            success: true,
+            data: {
+                categories: categories.filter(cat => cat).sort()
+            }
+        });
+    } catch (error) {
+        console.error('Get categories error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
 // Get single course by ID
 app.get('/api/courses/:id', async (req, res) => {
     try {
@@ -1475,25 +1497,6 @@ app.put('/api/courses/:id', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Get all course categories
-app.get('/api/courses/categories', async (req, res) => {
-    try {
-        const categories = await Course.distinct('category', { isDeleted: false });
-
-        res.json({
-            success: true,
-            data: {
-                categories: categories.filter(cat => cat).sort()
-            }
-        });
-    } catch (error) {
-        console.error('Get categories error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error'
-        });
-    }
-});
 
 // Get all course sellers
 app.get('/api/courses/sellers', async (req, res) => {
