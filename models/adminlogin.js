@@ -80,7 +80,7 @@ adminLoginSchema.statics.findByEmail = function (email) {
 // Create default admin if not exists
 adminLoginSchema.statics.createDefaultAdmin = async function () {
     try {
-        const defaultEmail = 'admin@u1technology.com';
+        const defaultEmail = 'info@u1technology.co.in';
         const defaultPassword = 'admin123';
 
         let existingAdmin = await this.findOne({ email: defaultEmail });

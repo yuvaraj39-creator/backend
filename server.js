@@ -284,7 +284,7 @@ app.post('/api/contact', async (req, res) => {
                         </div>
                     </div>
                     <p style="color: #555; font-size: 14px;">
-                        If you have any urgent inquiries, please call us at +91 99523 91994.
+                        If you have any urgent inquiries, please call us at +91 99523 91994, +91 97900 66301
                     </p>
                     <hr style="border: none; border-top: 1px solid rgba(128, 0, 32, 0.2); margin: 25px 0;">
                     <p style="color: #777; font-size: 12px; text-align: center;">
@@ -523,6 +523,245 @@ app.get('/api/admin/admins', authenticateAdmin, async (req, res) => {
         });
     }
 });
+
+
+
+// Lobby User Registration
+app.post('/api/lobby/register', async (req, res) => {
+    try {
+        const { name, email, phone, password } = req.body;
+
+        console.log('Lobby registration attempt:', {
+            name: name?.substring(0, 20) + '...',
+            email,
+            phone
+        });
+
+        // Basic validation
+        if (!name || !email || !phone || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields are required: name, email, phone, password'
+            });
+        }
+
+        // Validate phone format
+        if (!/^\d{10}$/.test(phone)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phone number must be exactly 10 digits'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a valid email address'
+            });
+        }
+
+        // Check if user already exists
+        const LobbyUser = require('./models/LobbyUser');
+        const existingUser = await LobbyUser.findOne({
+            $or: [
+                { email: email.toLowerCase().trim() },
+                { phone: phone.trim() }
+            ]
+        });
+
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'User with this email or phone already exists'
+            });
+        }
+
+        // Create new lobby user
+        const lobbyUser = new LobbyUser({
+            name: name.trim(),
+            email: email.toLowerCase().trim(),
+            phone: phone.trim(),
+            password: password
+        });
+
+        await lobbyUser.save();
+
+        // Generate JWT token
+        const token = jwt.sign(
+            {
+                userId: lobbyUser._id,
+                email: lobbyUser.email,
+                role: lobbyUser.role
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        console.log('Lobby user registered successfully:', lobbyUser.email);
+
+        res.status(201).json({
+            success: true,
+            message: 'Lobby account created successfully!',
+            data: {
+                user: lobbyUser.getProfile(),
+                token
+            }
+        });
+
+    } catch (error) {
+        console.error('Lobby registration error:', error);
+
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => ({
+                field: err.path,
+                message: err.message
+            }));
+
+            return res.status(400).json({
+                success: false,
+                message: 'Registration validation failed',
+                errors: errors
+            });
+        }
+
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'User with this email or phone already exists'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error during registration'
+        });
+    }
+});
+
+// Lobby User Login
+app.post('/api/lobby/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        console.log('Lobby login attempt for email:', email);
+
+        const LobbyUser = require('./models/LobbyUser');
+        
+        // Find user by email
+        const user = await LobbyUser.findOne({
+            email: email.toLowerCase().trim(),
+            isActive: true
+        });
+
+        if (!user) {
+            console.log('Lobby user not found for email:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        // Check password
+        const isPasswordValid = await user.comparePassword(password);
+
+        if (!isPasswordValid) {
+            console.log('Invalid password for lobby user:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        // Generate JWT token
+        const token = jwt.sign(
+            {
+                userId: user._id,
+                email: user.email,
+                role: user.role
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        // Update last login
+        await user.updateLastLogin();
+
+        console.log('Lobby login successful for user:', email);
+
+        res.json({
+            success: true,
+            message: 'Login successful',
+            data: {
+                user: user.getProfile(),
+                token
+            }
+        });
+
+    } catch (error) {
+        console.error('Lobby login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+// Get current lobby user profile
+app.get('/api/lobby/me', authenticateToken, async (req, res) => {
+    try {
+        const LobbyUser = require('./models/LobbyUser');
+        const user = await LobbyUser.findById(req.user.userId);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                user: user.getProfile()
+            }
+        });
+
+    } catch (error) {
+        console.error('Get lobby profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+// Get all lobby users (Admin only)
+app.get('/api/lobby/users', authenticateAdmin, async (req, res) => {
+    try {
+        const LobbyUser = require('./models/LobbyUser');
+        const users = await LobbyUser.find({}, { password: 0 })
+            .sort({ createdAt: -1 });
+
+        res.json({
+            success: true,
+            data: {
+                users,
+                total: users.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Get lobby users error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+});
+
+
 
 // Generate and Send OTP
 app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
@@ -2599,6 +2838,144 @@ app.get('/api/community/stats/overview', authenticateAdmin, async (req, res) => 
         res.status(500).json({
             success: false,
             message: 'Failed to fetch community statistics'
+        });
+    }
+});
+
+
+
+// Course Enquiry Form Submission
+app.post('/api/enquiry', async (req, res) => {
+    try {
+        const {
+            name,
+            phone,
+            email,
+            course,
+            studyMode,
+            message
+        } = req.body;
+
+        console.log('Course enquiry submission:', {
+            name: name?.substring(0, 20) + '...',
+            email,
+            course,
+            studyMode
+        });
+
+        // Basic validation
+        if (!name || !phone || !email || !course) {
+            return res.status(400).json({
+                success: false,
+                message: 'All required fields must be filled: name, phone, email, course'
+            });
+        }
+
+        // Check if email credentials are configured
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+            console.warn('Email credentials not configured. Enquiry form submission received:', { name, email, course, studyMode });
+            return res.status(500).json({
+                success: false,
+                message: 'Email service not configured. Please contact administrator.'
+            });
+        }
+
+        // Setup email transporter
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD
+            }
+        });
+
+        // Email content for admin
+        const adminMailOptions = {
+            from: `"U1 Technology Website" <${process.env.EMAIL_USER}>`,
+            to: process.env.EMAIL_USER,
+            subject: `New Course Enquiry: ${course}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">New Course Enquiry</h2>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Name:</strong> ${name}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                        <p><strong>Phone:</strong> ${phone}</p>
+                        <p><strong>Course:</strong> ${course}</p>
+                        <p><strong>Study Mode:</strong> ${studyMode}</p>
+                        <p><strong>Message:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            ${message ? message.replace(/\n/g, '<br>') : 'No additional message provided'}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        This enquiry was sent from the U1 Technology Institute course details page.
+                    </p>
+                </div>
+            `
+        };
+
+        // Email content for user (confirmation)
+        const userMailOptions = {
+            from: `"U1 Technology Institute" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `Thank you for your enquiry about ${course}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">Thank You for Your Enquiry</h2>
+                    <p style="font-size: 16px; color: #333;">
+                        Dear ${name},
+                    </p>
+                    <p style="font-size: 16px; color: #333;">
+                        Thank you for your interest in our <strong>${course}</strong> course. We have received your enquiry and will contact you within 24-48 hours with more information.
+                    </p>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Your Enquiry Details:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            <p><strong>Course:</strong> ${course}</p>
+                            <p><strong>Study Mode:</strong> ${studyMode}</p>
+                            ${message ? `<p><strong>Your Message:</strong> ${message}</p>` : ''}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        If you have any urgent inquiries, please call us at +91 99523 91994, +91 97900 66301
+                    </p>
+                    <hr style="border: none; border-top: 1px solid rgba(128, 0, 32, 0.2); margin: 25px 0;">
+                    <p style="color: #777; font-size: 12px; text-align: center;">
+                        This is an automated response. Please do not reply to this email.
+                    </p>
+                    <p style="text-align: center; color: rgba(128, 0, 32, 0.7); font-size: 12px; margin-top: 20px;">
+                        — U1 Technology Institute Team
+                    </p>
+                </div>
+            `
+        };
+
+        // Send emails
+        await transporter.sendMail(adminMailOptions);
+        await transporter.sendMail(userMailOptions);
+
+        console.log(`Course enquiry received and emails sent for: ${email}`);
+
+        res.json({
+            success: true,
+            message: 'Enquiry sent successfully'
+        });
+
+    } catch (error) {
+        console.error('Course enquiry error:', error);
+
+        // More specific error messages
+        if (error.code === 'EAUTH') {
+            return res.status(500).json({
+                success: false,
+                message: 'Email authentication failed. Please check email configuration.'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send enquiry. Please try again later.'
         });
     }
 });
