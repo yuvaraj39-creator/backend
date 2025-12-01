@@ -39,7 +39,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 app.use(helmet({
-  crossOriginResourcePolicy: false
+    crossOriginResourcePolicy: false
 }));
 
 
@@ -136,7 +136,12 @@ const authenticateToken = (req, res, next) => {
                 message: 'Invalid or expired token'
             });
         }
-        req.user = user;
+        req.user = {
+            userId: user.userId,
+            email: user.email,
+            role: user.role
+        };
+
         next();
     });
 };
@@ -648,12 +653,13 @@ app.post('/api/lobby/login', async (req, res) => {
         console.log('Lobby login attempt for email:', email);
 
         const LobbyUser = require('./models/LobbyUser');
-        
+
         // Find user by email
         const user = await LobbyUser.findOne({
             email: email.toLowerCase().trim(),
             isActive: true
         });
+        console.log('User found:', user ? 'Yes' : 'No');
 
         if (!user) {
             console.log('Lobby user not found for email:', email);
@@ -665,7 +671,7 @@ app.post('/api/lobby/login', async (req, res) => {
 
         // Check password
         const isPasswordValid = await user.comparePassword(password);
-
+        console.log('Password valid:', isPasswordValid);
         if (!isPasswordValid) {
             console.log('Invalid password for lobby user:', email);
             return res.status(401).json({
@@ -684,6 +690,7 @@ app.post('/api/lobby/login', async (req, res) => {
             JWT_SECRET,
             { expiresIn: '7d' }
         );
+        console.log('Token generated for user:', user.email);
 
         // Update last login
         await user.updateLastLogin();
@@ -695,7 +702,7 @@ app.post('/api/lobby/login', async (req, res) => {
             message: 'Login successful',
             data: {
                 user: user.getProfile(),
-                token
+                token: token
             }
         });
 
@@ -712,7 +719,16 @@ app.post('/api/lobby/login', async (req, res) => {
 app.get('/api/lobby/me', authenticateToken, async (req, res) => {
     try {
         const LobbyUser = require('./models/LobbyUser');
-        const user = await LobbyUser.findById(req.user.userId);
+        const userId = req.user.userId || req.user.id;
+        const user = await LobbyUser.findById(userId);
+
+        if (!req.user.id) {
+            return res.status(403).json({
+                success: false,
+                message: 'Invalid token (missing ID)'
+            });
+        }
+
 
         if (!user) {
             return res.status(404).json({
@@ -760,6 +776,7 @@ app.get('/api/lobby/users', authenticateAdmin, async (req, res) => {
         });
     }
 });
+
 
 
 
@@ -2102,8 +2119,8 @@ app.use((error, req, res, next) => {
 
 
 
-// Submit Course Application
-app.post('/api/applications/submit', async (req, res) => {
+// Course Enquiry Form Submission
+app.post('/api/enquiry', async (req, res) => {
     try {
         const {
             name,
@@ -2114,7 +2131,7 @@ app.post('/api/applications/submit', async (req, res) => {
             message
         } = req.body;
 
-        console.log('Course application submission:', {
+        console.log('Course enquiry submission:', {
             name: name?.substring(0, 20) + '...',
             email,
             course,
@@ -2122,87 +2139,127 @@ app.post('/api/applications/submit', async (req, res) => {
         });
 
         // Basic validation
-        if (!name || !phone || !email || !course || !studyMode) {
+        if (!name || !phone || !email || !course) {
             return res.status(400).json({
                 success: false,
-                message: 'All required fields must be filled: name, phone, email, course, study mode'
+                message: 'All required fields must be filled: name, phone, email, course'
             });
         }
 
-        // Check for duplicate applications (same email and course within last 24 hours)
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const existingApplication = await Application.findOne({
-            email: email.toLowerCase().trim(),
-            course,
-            createdAt: { $gte: twentyFourHoursAgo }
-        });
-
-        if (existingApplication) {
-            return res.status(400).json({
+        // Check if email credentials are configured
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+            console.warn('Email credentials not configured. Enquiry form submission received:', { name, email, course, studyMode });
+            return res.status(500).json({
                 success: false,
-                message: 'You have already applied for this course recently. Please wait 24 hours before submitting another application.'
+                message: 'Email service not configured. Please contact administrator.'
             });
         }
 
-        // Create new application
-        const application = new Application({
-            name: name.trim(),
-            phone: phone.trim(),
-            email: email.toLowerCase().trim(),
-            course,
-            studyMode,
-            message: message ? message.trim() : '',
-            ipAddress: req.ip || req.connection.remoteAddress,
-            userAgent: req.get('User-Agent')
-        });
-
-        await application.save();
-
-        console.log('Course application submitted successfully:', application.applicationId);
-
-        res.status(201).json({
-            success: true,
-            message: 'Application submitted successfully! We will contact you soon.',
-            data: {
-                application: application.getFormattedApplication(),
-                applicationId: application.applicationId
+        // Setup email transporter
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD
             }
         });
 
+        // Email content for admin
+        const adminMailOptions = {
+            from: `"U1 Technology Website" <${process.env.EMAIL_USER}>`,
+            to: process.env.EMAIL_USER,
+            subject: `New Course Enquiry: ${course}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">New Course Enquiry</h2>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Name:</strong> ${name}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                        <p><strong>Phone:</strong> ${phone}</p>
+                        <p><strong>Course:</strong> ${course}</p>
+                        <p><strong>Study Mode:</strong> ${studyMode}</p>
+                        <p><strong>Message:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            ${message ? message.replace(/\n/g, '<br>') : 'No additional message provided'}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        This enquiry was sent from the U1 Technology Institute course details page.
+                    </p>
+                </div>
+            `
+        };
+
+        // Email content for user (confirmation)
+        const userMailOptions = {
+            from: `"U1 Technology Institute" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `Thank you for your enquiry about ${course}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
+                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">Thank You for Your Enquiry</h2>
+                    <p style="font-size: 16px; color: #333;">
+                        Dear ${name},
+                    </p>
+                    <p style="font-size: 16px; color: #333;">
+                        Thank you for your interest in our <strong>${course}</strong> course. We have received your enquiry and will contact you within 24-48 hours with more information.
+                    </p>
+                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p><strong>Your Enquiry Details:</strong></p>
+                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
+                            <p><strong>Course:</strong> ${course}</p>
+                            <p><strong>Study Mode:</strong> ${studyMode}</p>
+                            ${message ? `<p><strong>Your Message:</strong> ${message}</p>` : ''}
+                        </div>
+                    </div>
+                    <p style="color: #555; font-size: 14px;">
+                        If you have any urgent inquiries, please call us at +91 99523 91994, +91 97900 66301
+                    </p>
+                    <hr style="border: none; border-top: 1px solid rgba(128, 0, 32, 0.2); margin: 25px 0;">
+                    <p style="color: #777; font-size: 12px; text-align: center;">
+                        This is an automated response. Please do not reply to this email.
+                    </p>
+                    <p style="text-align: center; color: rgba(128, 0, 32, 0.7); font-size: 12px; margin-top: 20px;">
+                        — U1 Technology Institute Team
+                    </p>
+                </div>
+            `
+        };
+
+        // Send emails
+        await transporter.sendMail(adminMailOptions);
+        await transporter.sendMail(userMailOptions);
+
+        console.log(`Course enquiry received and emails sent for: ${email}`);
+
+        res.json({
+            success: true,
+            message: 'Enquiry sent successfully'
+        });
+
     } catch (error) {
-        console.error('Application submission error:', error);
+        console.error('Course enquiry error:', error);
 
-        // Mongoose validation error
-        if (error.name === 'ValidationError') {
-            const errors = Object.values(error.errors).map(err => ({
-                field: err.path,
-                message: err.message
-            }));
-
-            return res.status(400).json({
+        // More specific error messages
+        if (error.code === 'EAUTH') {
+            return res.status(500).json({
                 success: false,
-                message: 'Application validation failed',
-                errors: errors
-            });
-        }
-
-        // Duplicate application ID error (should be very rare)
-        if (error.code === 11000) {
-            return res.status(400).json({
-                success: false,
-                message: 'Duplicate application detected. Please try again.'
+                message: 'Email authentication failed. Please check email configuration.'
             });
         }
 
         res.status(500).json({
             success: false,
-            message: 'Failed to submit application. Please try again later.'
+            message: 'Failed to send enquiry. Please try again later.'
         });
     }
 });
 
-// Get all applications (Admin only)
-app.get('/api/applications', authenticateAdmin, async (req, res) => {
+
+
+
+// Get all applications (User only)
+app.get('/api/applications', authenticateToken, async (req, res) => {
     try {
         const {
             page = 1,
@@ -2284,8 +2341,8 @@ app.get('/api/applications', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Get single application by ID (Admin only)
-app.get('/api/applications/:id', authenticateAdmin, async (req, res) => {
+// Get single application by ID (User only)
+app.get('/api/applications/:id', authenticateToken, async (req, res) => {
     try {
         const application = await Application.findOne({
             $or: [
@@ -2325,8 +2382,8 @@ app.get('/api/applications/:id', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Update application status (Admin only)
-app.put('/api/applications/:id/status', authenticateAdmin, async (req, res) => {
+// Update application status (User only)
+app.put('/api/applications/:id/status', authenticateToken, async (req, res) => {
     try {
         const { status, adminNotes } = req.body;
 
@@ -2385,8 +2442,8 @@ app.put('/api/applications/:id/status', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Get application statistics (Admin only)
-app.get('/api/applications/stats/overview', authenticateAdmin, async (req, res) => {
+// Get application statistics (User only)
+app.get('/api/applications/stats/overview', authenticateToken, async (req, res) => {
     try {
         const totalApplications = await Application.countDocuments();
         const pendingApplications = await Application.countDocuments({ status: 'pending' });
@@ -2442,7 +2499,6 @@ app.get('/api/applications/stats/overview', authenticateAdmin, async (req, res) 
         });
     }
 });
-
 
 
 
@@ -2598,8 +2654,8 @@ app.post('/api/community/join', async (req, res) => {
     }
 });
 
-// Get all community submissions (Admin only)
-app.get('/api/community/submissions', authenticateAdmin, async (req, res) => {
+// Get all community submissions (User only)
+app.get('/api/community/submissions', authenticateToken, async (req, res) => {
     try {
         const {
             page = 1,
@@ -2675,8 +2731,8 @@ app.get('/api/community/submissions', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Get single community submission by ID (Admin only)
-app.get('/api/community/submissions/:id', authenticateAdmin, async (req, res) => {
+// Get single community submission by ID (User only)
+app.get('/api/community/submissions/:id', authenticateToken, async (req, res) => {
     try {
         const submission = await Community.findById(req.params.id);
 
@@ -2711,8 +2767,8 @@ app.get('/api/community/submissions/:id', authenticateAdmin, async (req, res) =>
     }
 });
 
-// Update community submission status (Admin only)
-app.put('/api/community/submissions/:id/status', authenticateAdmin, async (req, res) => {
+// Update community submission status (User only)
+app.put('/api/community/submissions/:id/status', authenticateToken, async (req, res) => {
     try {
         const { status, notes } = req.body;
 
@@ -2761,8 +2817,8 @@ app.put('/api/community/submissions/:id/status', authenticateAdmin, async (req, 
     }
 });
 
-// Get community statistics (Admin only)
-app.get('/api/community/stats/overview', authenticateAdmin, async (req, res) => {
+// Get community statistics (User only)
+app.get('/api/community/stats/overview', authenticateToken, async (req, res) => {
     try {
         const totalSubmissions = await Community.countDocuments();
         const pendingSubmissions = await Community.countDocuments({ status: 'pending' });
@@ -2838,144 +2894,6 @@ app.get('/api/community/stats/overview', authenticateAdmin, async (req, res) => 
         res.status(500).json({
             success: false,
             message: 'Failed to fetch community statistics'
-        });
-    }
-});
-
-
-
-// Course Enquiry Form Submission
-app.post('/api/enquiry', async (req, res) => {
-    try {
-        const {
-            name,
-            phone,
-            email,
-            course,
-            studyMode,
-            message
-        } = req.body;
-
-        console.log('Course enquiry submission:', {
-            name: name?.substring(0, 20) + '...',
-            email,
-            course,
-            studyMode
-        });
-
-        // Basic validation
-        if (!name || !phone || !email || !course) {
-            return res.status(400).json({
-                success: false,
-                message: 'All required fields must be filled: name, phone, email, course'
-            });
-        }
-
-        // Check if email credentials are configured
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-            console.warn('Email credentials not configured. Enquiry form submission received:', { name, email, course, studyMode });
-            return res.status(500).json({
-                success: false,
-                message: 'Email service not configured. Please contact administrator.'
-            });
-        }
-
-        // Setup email transporter
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASSWORD
-            }
-        });
-
-        // Email content for admin
-        const adminMailOptions = {
-            from: `"U1 Technology Website" <${process.env.EMAIL_USER}>`,
-            to: process.env.EMAIL_USER,
-            subject: `New Course Enquiry: ${course}`,
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
-                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">New Course Enquiry</h2>
-                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
-                        <p><strong>Name:</strong> ${name}</p>
-                        <p><strong>Email:</strong> ${email}</p>
-                        <p><strong>Phone:</strong> ${phone}</p>
-                        <p><strong>Course:</strong> ${course}</p>
-                        <p><strong>Study Mode:</strong> ${studyMode}</p>
-                        <p><strong>Message:</strong></p>
-                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
-                            ${message ? message.replace(/\n/g, '<br>') : 'No additional message provided'}
-                        </div>
-                    </div>
-                    <p style="color: #555; font-size: 14px;">
-                        This enquiry was sent from the U1 Technology Institute course details page.
-                    </p>
-                </div>
-            `
-        };
-
-        // Email content for user (confirmation)
-        const userMailOptions = {
-            from: `"U1 Technology Institute" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: `Thank you for your enquiry about ${course}`,
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #fff; border: 1px solid rgba(128, 0, 32, 0.3); border-radius: 10px; padding: 20px; box-shadow: 0 0 10px rgba(128, 0, 32, 0.2);">
-                    <h2 style="color: rgba(128, 0, 32, 0.7); text-align: center;">Thank You for Your Enquiry</h2>
-                    <p style="font-size: 16px; color: #333;">
-                        Dear ${name},
-                    </p>
-                    <p style="font-size: 16px; color: #333;">
-                        Thank you for your interest in our <strong>${course}</strong> course. We have received your enquiry and will contact you within 24-48 hours with more information.
-                    </p>
-                    <div style="background-color: rgba(128, 0, 32, 0.1); padding: 15px; border-radius: 8px; margin: 20px 0;">
-                        <p><strong>Your Enquiry Details:</strong></p>
-                        <div style="background-color: white; padding: 10px; border-radius: 5px; border: 1px solid rgba(128, 0, 32, 0.2);">
-                            <p><strong>Course:</strong> ${course}</p>
-                            <p><strong>Study Mode:</strong> ${studyMode}</p>
-                            ${message ? `<p><strong>Your Message:</strong> ${message}</p>` : ''}
-                        </div>
-                    </div>
-                    <p style="color: #555; font-size: 14px;">
-                        If you have any urgent inquiries, please call us at +91 99523 91994, +91 97900 66301
-                    </p>
-                    <hr style="border: none; border-top: 1px solid rgba(128, 0, 32, 0.2); margin: 25px 0;">
-                    <p style="color: #777; font-size: 12px; text-align: center;">
-                        This is an automated response. Please do not reply to this email.
-                    </p>
-                    <p style="text-align: center; color: rgba(128, 0, 32, 0.7); font-size: 12px; margin-top: 20px;">
-                        — U1 Technology Institute Team
-                    </p>
-                </div>
-            `
-        };
-
-        // Send emails
-        await transporter.sendMail(adminMailOptions);
-        await transporter.sendMail(userMailOptions);
-
-        console.log(`Course enquiry received and emails sent for: ${email}`);
-
-        res.json({
-            success: true,
-            message: 'Enquiry sent successfully'
-        });
-
-    } catch (error) {
-        console.error('Course enquiry error:', error);
-
-        // More specific error messages
-        if (error.code === 'EAUTH') {
-            return res.status(500).json({
-                success: false,
-                message: 'Email authentication failed. Please check email configuration.'
-            });
-        }
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to send enquiry. Please try again later.'
         });
     }
 });
@@ -3086,8 +3004,8 @@ app.post('/api/quiz/redeem', async (req, res) => {
     }
 });
 
-// Get all quiz redeem codes (Admin only)
-app.get('/api/quiz/redeem', authenticateAdmin, async (req, res) => {
+// Get all quiz redeem codes (User only)
+app.get('/api/quiz/redeem', authenticateToken, async (req, res) => {
     try {
         const {
             page = 1,

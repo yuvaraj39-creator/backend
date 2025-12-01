@@ -29,8 +29,8 @@ const lobbyUserSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        default: 'lobby_user',
-        enum: ['lobby_user', 'lobby_admin']
+        default: 'lobby_admin',
+        enum: ['lobby_admin']
     },
     isActive: {
         type: Boolean,
