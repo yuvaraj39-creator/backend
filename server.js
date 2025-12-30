@@ -719,16 +719,18 @@ app.post('/api/lobby/login', async (req, res) => {
 app.get('/api/lobby/me', authenticateToken, async (req, res) => {
     try {
         const LobbyUser = require('./models/LobbyUser');
-        const userId = req.user.userId || req.user.id;
-        const user = await LobbyUser.findById(userId);
 
-        if (!req.user.id) {
+        // Token contains userId, NOT id
+        const userId = req.user.userId;
+
+        if (!userId) {
             return res.status(403).json({
                 success: false,
-                message: 'Invalid token (missing ID)'
+                message: 'Invalid token'
             });
         }
 
+        const user = await LobbyUser.findById(userId);
 
         if (!user) {
             return res.status(404).json({
@@ -1777,7 +1779,7 @@ app.get('/api/courses/sellers', async (req, res) => {
     }
 });
 
-// Delete course (soft delete)
+// Delete course (hard delete)
 app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
     try {
         // Check if user is admin
@@ -1788,24 +1790,31 @@ app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
             });
         }
 
-        const course = await Course.findOne({
-            _id: req.params.id,
-            isDeleted: false
-        });
+        const courseId = req.params.id;
 
-        if (!course) {
+        // Validate course ID format
+        if (!mongoose.Types.ObjectId.isValid(courseId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid course ID format'
+            });
+        }
+
+        // Perform hard delete - permanently remove from database
+        const result = await Course.findByIdAndDelete(courseId);
+
+        if (!result) {
             return res.status(404).json({
                 success: false,
                 message: 'Course not found'
             });
         }
 
-        // Soft delete
-        await course.softDelete();
+        console.log(`Course permanently deleted: ${courseId}`);
 
         res.json({
             success: true,
-            message: 'Course deleted successfully'
+            message: 'Course permanently deleted successfully'
         });
 
     } catch (error) {
@@ -1820,7 +1829,7 @@ app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: 'Internal server error'
+            message: 'Internal server error while deleting course'
         });
     }
 });
@@ -2068,13 +2077,11 @@ app.put('/api/posters/:id', authenticateAdmin, async (req, res) => {
     }
 });
 
-// Delete poster (soft delete)
+// Delete poster (hard delete - permanently from database)
 app.delete('/api/posters/:id', authenticateAdmin, async (req, res) => {
     try {
-        const poster = await Poster.findOne({
-            _id: req.params.id,
-            isDeleted: false
-        });
+        // Check if poster exists (optional, depending on your needs)
+        const poster = await Poster.findById(req.params.id);
 
         if (!poster) {
             return res.status(404).json({
@@ -2083,12 +2090,15 @@ app.delete('/api/posters/:id', authenticateAdmin, async (req, res) => {
             });
         }
 
-        // Soft delete
-        await poster.softDelete();
+        // Hard delete - permanently remove from database
+        await Poster.findByIdAndDelete(req.params.id);
+        
+        // Alternative: You can also use deleteOne()
+        // await Poster.deleteOne({ _id: req.params.id });
 
         res.json({
             success: true,
-            message: 'Poster deleted successfully'
+            message: 'Poster permanently deleted from database'
         });
 
     } catch (error) {
@@ -3103,6 +3113,74 @@ app.get('/api/quiz/redeem/user/:userId', authenticateToken, async (req, res) => 
         res.status(500).json({
             success: false,
             message: 'Failed to fetch redeem codes'
+        });
+    }
+});
+
+
+// Soft delete quiz redeem code
+app.delete('/api/quiz/redeem/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Validate ID format
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid quiz redeem ID format'
+            });
+        }
+
+        // Find the quiz redeem record
+        const quizRedeem = await QuizRedeem.findById(id);
+
+        if (!quizRedeem) {
+            return res.status(404).json({
+                success: false,
+                message: 'Quiz redeem record not found'
+            });
+        }
+
+        // Check if already deleted
+        if (quizRedeem.isDeleted) {
+            return res.status(400).json({
+                success: false,
+                message: 'Quiz redeem record is already deleted'
+            });
+        }
+
+        // Perform soft delete
+        quizRedeem.isDeleted = true;
+        quizRedeem.deletedAt = new Date();
+        quizRedeem.deletedBy = req.user.userId || req.user.adminId;
+
+        await quizRedeem.save();
+
+        console.log(`Quiz redeem soft deleted: ${id} by user ${req.user.userId}`);
+
+        res.json({
+            success: true,
+            message: 'Quiz redeem record soft deleted successfully',
+            data: {
+                redeemId: quizRedeem._id,
+                isDeleted: quizRedeem.isDeleted,
+                deletedAt: quizRedeem.deletedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('Soft delete quiz redeem error:', error);
+
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid quiz redeem ID'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to soft delete quiz redeem record'
         });
     }
 });

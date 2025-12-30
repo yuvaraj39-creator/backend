@@ -65,7 +65,7 @@ const communitySchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'contacted', 'approved', 'rejected'],
+        enum: ['pending', 'contacted', 'approved', 'rejected','processing','completed','not-interested'],
         default: 'pending'
     },
     notes: {
