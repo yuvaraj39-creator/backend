@@ -36,11 +36,11 @@ app.get("/health", (req, res) => {
 // CORS configuration
 const corsOptions = {
     origin: [
-        "https://u1technology.netlify.app",
-        "https://u1technology.co.in",
-        "https://www.u1technology.co.in",
         "http://localhost:3000",
-        "http://127.0.0.1:5500"
+        "http://127.0.0.1:5500",
+        "https://6953b4aed4f2e000838df6b-u1technology.netlify.app",
+        "https://u1technology.co.in",
+        "https://www.u1technology.co.in"
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
