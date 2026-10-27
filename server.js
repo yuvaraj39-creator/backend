@@ -21,6 +21,18 @@ const QuizRedeem = require('./models/QuizRedeem');
 
 const app = express();
 
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    health: true,
+    message: "Backend is healthy"
+  });
+});
+
+
+
+
 // CORS configuration
 const corsOptions = {
     origin: [
